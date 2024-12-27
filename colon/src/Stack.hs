@@ -1,13 +1,15 @@
 module Stack (State(..), emptyState, push, pop, top) where
 
 type Stack = [Int]
-data State = State { stack :: Stack, variables :: [(String, Int)] }
+type Variables = [(String, Int)]
+
+data State = State { stack :: Stack, variables :: Variables }
 
 emptyState :: State
 emptyState = State [] []
 
 push :: Int -> State -> State
-push n (State st vars) = State (n:st) vars
+push n (State st vars) = State (n : st) vars
 
 pop :: State -> (Int, State)
 pop (State (x:xs) vars) = (x, State xs vars)

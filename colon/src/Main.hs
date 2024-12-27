@@ -4,17 +4,18 @@ import Stack
 import Arithmetic
 import Memory
 import qualified IO -- Избегаем конфликта с Prelude
-import Interpreter
+import Interpreter (execute, Dictionary)
+import qualified Data.Map as Map
 
 main :: IO ()
 main = do
     putStrLn "Welcome to the Colon interpreter!"
-    repl emptyState
+    repl emptyState Map.empty
 
-repl :: State -> IO ()
-repl state = do
+repl :: State -> Dictionary -> IO ()
+repl state dict = do
     putStr "Colon> "
     input <- getLine
-    let newState = Interpreter.execute input state
+    let (newState, newDict) = execute input state dict
     IO.printStack newState -- Используем IO.printStack для явного вызова
-    repl newState
+    repl newState newDict

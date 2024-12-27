@@ -1,19 +1,32 @@
-module Interpreter (execute, ifElse, loop) where
+module Interpreter (execute, Dictionary) where
 
 import Stack
-import Arithmetic
-import Memory
 import Text.Read (readMaybe)
+import System.IO.Unsafe (unsafePerformIO)
+import qualified Data.Map as Map
 
-execute :: String -> State -> State
-execute input state = interpretTokens (words input) state
+type Dictionary = Map.Map String [String]
 
-interpretTokens :: [String] -> State -> State
-interpretTokens [] state = state
-interpretTokens (token:tokens) state = interpretTokens tokens (interpret token state)
+execute :: String -> State -> Dictionary -> (State, Dictionary)
+execute input state dictionary = interpretTokens (words input) state dictionary
 
-interpret :: String -> State -> State
-interpret token state = case token of
+interpretTokens :: [String] -> State -> Dictionary -> (State, Dictionary)
+interpretTokens [] state dict = (state, dict)
+interpretTokens (token:tokens) state dict
+    | token == "CR" = interpretTokens tokens (ioAction (putStrLn "") state) dict
+    | token == "." = interpretTokens tokens (unaryOp printTop state) dict
+    | head token == '.' && last token == '"' =
+        let str = init (tail token)
+        in interpretTokens tokens (ioAction (putStr str) state) dict
+    | token == ":" =
+        let (newState, newDict, restTokens) = defineWord tokens state dict
+        in interpretTokens restTokens newState newDict
+    | otherwise =
+        let newState = interpret token state dict
+        in interpretTokens tokens newState dict
+
+interpret :: String -> State -> Dictionary -> State
+interpret token state dict = case token of
     "+" -> binaryOp (\a b -> push (a + b)) state
     "-" -> binaryOp (\a b -> push (b - a)) state
     "*" -> binaryOp (\a b -> push (a * b)) state
@@ -22,11 +35,25 @@ interpret token state = case token of
     "DUP" -> unaryOp (\n st -> push n (push n st)) state
     "DROP" -> unaryOp (\_ st -> st) state
     "SWAP" -> binaryOp (\a b st -> push a (push b st)) state
-    "OVER" -> overOp state
-    "ROT" -> rotOp state
+    "<" -> binaryOp (\a b -> push (if b < a then -1 else 0)) state
+    ">" -> binaryOp (\a b -> push (if b > a then -1 else 0)) state
+    "=" -> binaryOp (\a b -> push (if b == a then -1 else 0)) state
     numStr -> case readMaybe numStr of
         Just num -> push num state
-        Nothing -> error $ "Invalid input: " ++ numStr
+        Nothing -> invokeWord token state dict
+
+invokeWord :: String -> State -> Dictionary -> State
+invokeWord token state dict =
+    case Map.lookup token dict of
+        Just body -> fst $ interpretTokens body state dict
+        Nothing -> error $ "Undefined word: " ++ token
+
+defineWord :: [String] -> State -> Dictionary -> (State, Dictionary, [String])
+defineWord tokens state dict =
+    let (name:body) = takeWhile (/= ";") tokens
+        newDict = Map.insert name body dict
+        restTokens = drop (length body + 1) tokens  -- Пропускаем тело и ";"
+    in (state, newDict, restTokens)
 
 binaryOp :: (Int -> Int -> State -> State) -> State -> State
 binaryOp op state =
@@ -39,36 +66,8 @@ unaryOp op state =
     let (a, state') = pop state
     in op a state'
 
-overOp :: State -> State
-overOp state =
-    let (a, state') = pop state
-        (b, state'') = pop state'
-    in push b (push a (push b state''))
+ioAction :: IO () -> State -> State
+ioAction action state = seq (unsafePerformIO action) state
 
-rotOp :: State -> State
-rotOp state =
-    let (a, state') = pop state
-        (b, state'') = pop state'
-        (c, state''') = pop state''
-    in push b (push c (push a state'''))
-
-ifElse :: [String] -> State -> State
-ifElse tokens st =
-    let (cond, st') = pop st
-        (trueBranch, rest) = break (== "THEN") tokens
-        falseBranch = drop 1 $ dropWhile (/= "ELSE") rest
-    in if cond /= 0
-       then interpretTokens trueBranch st'
-       else interpretTokens falseBranch st'
-
-loop :: [String] -> State -> State
-loop tokens st =
-    let (start, st') = pop st
-        (end, st'') = pop st'
-        body = takeWhile (/= "LOOP") tokens
-    in loop' start end st'' body
-
-loop' :: Int -> Int -> State -> [String] -> State
-loop' current end st body
-    | current >= end = st
-    | otherwise = loop' (current + 1) end (interpretTokens body st) body
+printTop :: Int -> State -> State
+printTop n state = ioAction (print n) state
