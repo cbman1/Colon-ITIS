@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -Wno-overlapping-patterns #-}
+-- Parser.hs
 module Parser (
     parseAndExecute,
     processTokens
@@ -15,6 +15,8 @@ import qualified Data.Map as Map
 import Memory
 import Control.Monad.State
 import Control.Monad.IO.Class (liftIO)
+import Data.Bits (complement, (.&.), (.|.))
+import Graphics
 
 -- Парсинг и выполнение команд
 parseAndExecute :: String -> Stack -> Dictionary -> MemoryMonad (Stack, Dictionary)
@@ -37,6 +39,7 @@ processTokens (token:tokens) stack dictionary isDefining
             -- Завершение определения слова
             executeTokens tokens stack dictionary False
         else
+            -- Добавление токена в текущую дефиницию
             defineWord token tokens stack dictionary
     | token == ":" = do
         case tokens of
@@ -56,14 +59,14 @@ processTokens (token:tokens) stack dictionary isDefining
     | isNumber token = -- Число
         let number = read token :: Int
         in processTokens tokens (push number stack) dictionary isDefining
-    | token `elem` ["+", "-", "*", "/", "MOD", "DUP", "DROP", "SWAP", "OVER", "ROT", ".", "CR", "EMIT", "KEY", ".\"", "=", "<", ">", "AND", "OR", "INVERT", "IF", "DO", "I", "LOOP", "VARIABLE", "CONSTANT", "!", "@", "?", "+!", "-!", "*!", "/!", "MOD!"] =
+    | token `elem` ["+", "-", "*", "/", "MOD", "DUP", "DROP", "SWAP", "OVER", "ROT", ".", "CR", "EMIT", "KEY", ".\"", "=", "<", ">", "AND", "OR", "INVERT", "IF", "DO", "I", "LOOP", "VARIABLE", "CONSTANT", "!", "@", "?", "+!", "-!", "*!", "/!", "MOD!", "GRAPHICS", "WIDTH", "HEIGHT", "LAST-KEY"] =
+        -- Обработка существующих команд
         handleCommand token tokens stack dictionary isDefining
     | otherwise = case Map.lookup token dictionary of
         Just definition -> processTokens (definition ++ tokens) stack dictionary isDefining
         Nothing -> do
             liftIO $ putStrLn $ "Unknown command: " ++ token
             return (stack, dictionary)
-
 
 -- Функция для начала определения нового слова
 defineWordDefinition :: String -> [String] -> Stack -> Dictionary -> ExecuteMonad (Stack, Dictionary)
@@ -79,9 +82,6 @@ defineWordDefinition wordName tokens stack dictionary = do
         liftIO $ putStrLn "ok"
         -- Продолжаем обработку оставшихся токенов после ';'
         processTokens (tail remaining) stack newDict False
-
--- Альтернативный подход: использовать отдельную функцию для определения
--- Но в данном случае, выше представлена простая реализация
 
 -- Обработка команд
 handleCommand :: String -> [String] -> Stack -> Dictionary -> Bool -> ExecuteMonad (Stack, Dictionary)
@@ -126,11 +126,62 @@ handleCommand token tokens stack dictionary isDefining
     | token `elem` ["!", "@", "?", "+!", "-!", "*!", "/!", "MOD!"] = do
         -- Обработка операторов над переменными
         handleVariableOperator token tokens stack dictionary isDefining
-    | token == "BEGIN" || token == "UNTIL" =
-            -- Эти команды уже обрабатываются в processTokens
-            -- Возвращаем текущее состояние без изменений
-            return (stack, dictionary)
-
+    | token == "GRAPHICS" = do
+        -- Получение адреса GRAPHICS
+        case Map.lookup "GRAPHICS" dictionary of
+            Just [addrStr] -> do
+                let addr = read addrStr :: Int
+                -- Установка состояния GRAPHICS (0 или 1)
+                case stack of
+                    (val:rest) -> do
+                        if val == 0 || val == 1
+                            then do
+                                setResult <- setVariable addr val
+                                case setResult of
+                                    Left err -> do
+                                        liftIO $ putStrLn err
+                                        processTokens tokens rest dictionary isDefining
+                                    Right () -> do
+                                        liftIO $ putStrLn "ok"
+                                        -- Обновление графики
+                                        (_, _, _, graphicsState) <- get
+                                        liftIO $ updateGraphics graphicsState addr val
+                                        processTokens tokens rest dictionary isDefining
+                            else do
+                                liftIO $ putStrLn "Ошибка: GRAPHICS принимает только 0 или 1"
+                                return (stack, dictionary)
+                    _ -> do
+                        liftIO $ putStrLn "Ошибка: Стек должен содержать значение для GRAPHICS"
+                        return (stack, dictionary)
+            Nothing -> do
+                liftIO $ putStrLn "Ошибка: GRAPHICS не объявлена"
+                return (stack, dictionary)
+    | token == "WIDTH" = do
+        -- Получение WIDTH (адрес 0)
+        case Map.lookup "WIDTH" dictionary of
+            Just [widthStr] -> do
+                let widthVal = read widthStr :: Int
+                processTokens tokens (push widthVal stack) dictionary isDefining
+            Nothing -> do
+                liftIO $ putStrLn "Ошибка: WIDTH не объявлена"
+                return (stack, dictionary)
+    | token == "HEIGHT" = do
+        -- Получение HEIGHT (адрес 1)
+        case Map.lookup "HEIGHT" dictionary of
+            Just [heightStr] -> do
+                let heightVal = read heightStr :: Int
+                processTokens tokens (push heightVal stack) dictionary isDefining
+            Nothing -> do
+                liftIO $ putStrLn "Ошибка: HEIGHT не объявлена"
+                return (stack, dictionary)
+    | token == "LAST-KEY" = do
+        -- Получение последнего нажатого ключа
+        (_, _, lastKeyVal, _) <- get
+        case lastKeyVal of
+            Just keyCode -> processTokens tokens (push keyCode stack) dictionary isDefining
+            Nothing -> do
+                liftIO $ putStrLn "Ошибка: Нет зарегистрированных нажатий клавиш"
+                return (stack, dictionary)
     | otherwise = do
         -- Обработка арифметических и других команд
         case token of
@@ -192,6 +243,7 @@ handleCommand token tokens stack dictionary isDefining
                     -- Здесь предполагается, что 'I' используется внутри цикла для доступа к текущему индексу
                     -- Необходимо хранить текущий индекс в LoopStack
                     -- В текущей реализации LoopStack не используется
+                    -- Для полноценной реализации потребуется расширение
                     -- Для простоты, просто дублируем верхнее значение стека
                     processTokens tokens (push (head stack) stack) dictionary isDefining
                 _ -> do
@@ -216,6 +268,9 @@ handleVariableOperator token tokens stack dictionary isDefining
                         processTokens tokens restStack dictionary isDefining
                     Right () -> do
                         liftIO $ putStrLn "ok"
+                        -- Обновление графики, если addr относится к GRAPHICS
+                        (_, _, _, graphicsState) <- get
+                        liftIO $ updateGraphics graphicsState addr value
                         processTokens tokens restStack dictionary isDefining
             _ -> do
                 liftIO $ putStrLn "Ошибка: Стек должен содержать адрес и значение для '!'"
@@ -271,33 +326,29 @@ handleVariableOperator token tokens stack dictionary isDefining
                                 processTokens tokens restStack dictionary isDefining
                             Right () -> do
                                 liftIO $ putStrLn "ok"
+                                -- Обновление графики, если addr относится к GRAPHICS
+                                (_, _, _, graphicsState) <- get
+                                liftIO $ updateGraphics graphicsState varAddr newVal
                                 processTokens tokens restStack dictionary isDefining
             _ -> do
                 liftIO $ putStrLn $ "Ошибка: Стек должен содержать адрес и значение для '" ++ token ++ "'"
                 return (stack, dictionary)
-
--- Функция для определения нового слова
-defineWord :: String -> [String] -> Stack -> Dictionary -> ExecuteMonad (Stack, Dictionary)
-defineWord _ _ _ _ = do
-    -- В данном подходе определение слова уже обрабатывается в defineWordDefinition
-    -- Эта функция может быть удалена или оставлена пустой
-    return ([], Map.empty)
 
 -- Условный оператор IF ... THEN
 ifThen :: Stack -> [String] -> Dictionary -> Bool -> ExecuteMonad (Stack, Dictionary)
 ifThen stack tokens dictionary isDefining = do
     let (condition, stack') = pop stack
     if condition /= 0
-        then processTokens tokens stack' dictionary isDefining  -- Передаем стек циклов
-        else return (stack', dictionary)
+        then processTokens tokens stack' dictionary isDefining  -- Выполняем ifPart
+        else return (stack', dictionary) -- Пропускаем ifPart
 
 -- Условный оператор IF ... ELSE ... THEN
 ifThenElse :: Stack -> [String] -> [String] -> Dictionary -> Bool -> ExecuteMonad (Stack, Dictionary)
 ifThenElse stack ifTokens elseTokens dictionary isDefining = do
     let (condition, stack') = pop stack
     if condition /= 0
-        then processTokens ifTokens stack' dictionary isDefining  -- Передаем стек циклов
-        else processTokens elseTokens stack' dictionary isDefining  -- Передаем стек циклов
+        then processTokens ifTokens stack' dictionary isDefining
+        else processTokens elseTokens stack' dictionary isDefining
 
 -- Разделение токенов для IF ... THEN
 splitIfTokens :: [String] -> ([String], [String])
@@ -341,20 +392,21 @@ processLoop start end tokens stack dictionary isDefining = do
     let indices = if start < end then [start..(end-1)] else reverse [end..(start-1)]
     foldM processLoopIteration (stack, dictionary) indices
   where
+    processLoopIteration :: (Stack, Dictionary) -> Int -> ExecuteMonad (Stack, Dictionary)
     processLoopIteration (currentStack, currentDictionary) index = do
         -- Предполагаем, что 'I' должен возвращать текущий индекс
-        -- Но в текущей реализации 'I' просто дублирует верхнее значение
-        -- Для корректной реализации необходимо хранить текущий индекс
-        -- В текущем контексте это не реализовано
+        -- В текущей реализации 'I' просто дублирует верхнее значение
+        -- Для полноценной реализации потребуется расширение
         -- Для простоты, просто помещаем индекс на стек
         (finalStack, finalDictionary) <- processTokens tokens (push index currentStack) currentDictionary isDefining
         return (finalStack, finalDictionary)
+
 -- Циклическая обработка для команды BEGIN ... UNTIL
 processBeginUntil :: [String] -> Stack -> Dictionary -> ExecuteMonad (Stack, Dictionary)
 processBeginUntil bodyTokens stack dictionary = do
     let executeOnce currentStack currentDictionary = do
             -- Выполнение тела цикла
-            (newStack, newDictionary) <- processTokens bodyTokens currentStack currentDictionary False
+            (newStack, newDictionary) <- processTokens bodyTokens currentStack newDictionary False
             -- Проверка условия: верхнее значение стека
             case newStack of
                 (condition:restStack) ->
@@ -365,4 +417,3 @@ processBeginUntil bodyTokens stack dictionary = do
                     liftIO $ putStrLn "Ошибка: Стек пуст при проверке условия в UNTIL"
                     return (newStack, newDictionary)
     executeOnce stack dictionary
-

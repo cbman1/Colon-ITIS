@@ -1,118 +1,83 @@
-module Memory where
+-- Memory.hs
+module Memory (
+    MemoryState,
+    initialMemory,
+    declareVariable,
+    setVariable,
+    getVariable,
+    declareConstant,
+    addWord
+) where
 
+import Control.Monad.State
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Control.Monad.State
-import Control.Monad.IO.Class (liftIO)
+import GraphicsState -- Новый модуль для состояния графики
 
--- Тип для хранения пользовательских определений
+type Address = Int
+type Memory = Map Address Int
 type Dictionary = Map String [String]
 
--- Тип для хранения переменных и их адресов
-type Variables = Map String Int
-
--- Тип для хранения значений переменных
-type VariableValues = Map Int Int
-
--- Тип для хранения констант и их значений
-type Constants = Map String Int
-
--- Инициализация пустого словаря
-emptyDictionary :: Dictionary
-emptyDictionary = Map.empty
-
--- Инициализация пустых словарей
-emptyVariables :: Variables
-emptyVariables = Map.empty
-
-emptyVariableValues :: VariableValues
-emptyVariableValues = Map.empty
-
-emptyConstants :: Constants
-emptyConstants = Map.empty
-
--- Добавление нового слова в словарь
-addWord :: String -> [String] -> Dictionary -> Dictionary
-addWord name definition dictionary = Map.insert name definition dictionary
-
--- Получение определения слова
-getWord :: String -> Dictionary -> Maybe [String]
-getWord name dictionary = Map.lookup name dictionary
-
--- Добавление переменной
-addVariable :: String -> Int -> Variables -> Variables
-addVariable name address variables = Map.insert name address variables
-
--- Получение адреса переменной
-getVariableAddress :: String -> Variables -> Maybe Int
-getVariableAddress name variables = Map.lookup name variables
-
--- Добавление константы
-addConstant :: String -> Int -> Constants -> Constants
-addConstant name value constants = Map.insert name value constants
-
--- Получение значения константы
-getConstantValue :: String -> Constants -> Maybe Int
-getConstantValue name constants = Map.lookup name constants
-
--- Тип состояния памяти
-data MemoryState = MemoryState {
-    variables :: Variables,
-    variableValues :: VariableValues,
-    constants :: Constants,
-    nextAddress :: Int
-} deriving Show
-
--- Инициализация состояния памяти
-initialMemory :: MemoryState
-initialMemory = MemoryState {
-    variables = emptyVariables,
-    variableValues = emptyVariableValues,
-    constants = emptyConstants,
-    nextAddress = 1000  -- Начальный адрес для переменных
-}
-
--- Монадический контекст для работы с памятью
 type MemoryMonad = StateT MemoryState IO
 
--- Объявление переменной
-declareVariable :: String -> MemoryMonad (Either String Int)
+-- Обновленная структура состояния памяти
+type MemoryState = (Memory, Address, Maybe Int, GraphicsState) -- (memory, nextAddress, lastKey, graphicsState)
+
+-- Инициализация памяти с предварительно заданными WIDTH и HEIGHT
+initialMemory :: MemoryState
+initialMemory = (initialMem, nextAddr, Nothing, GraphicsState (replicate h (replicate w 0)) w h Nothing)
+  where
+    w = 10 -- WIDTH = 10
+    h = 10 -- HEIGHT = 10
+    initialMem = Map.fromList [
+        (0, w),   -- WIDTH по адресу 0
+        (1, h)    -- HEIGHT по адресу 1
+        -- GRAPHICS будет управляться через graphicsState
+        ]
+    nextAddr = 2 -- Следующий доступный адрес после WIDTH и HEIGHT
+
+-- Функция для добавления слова в словарь
+addWord :: String -> [String] -> Dictionary -> Dictionary
+addWord = Map.insert
+
+-- Объявление переменной: возвращает её адрес
+declareVariable :: String -> MemoryMonad (Either String Address)
 declareVariable name = do
-    mem <- get
-    if Map.member name (variables mem) || Map.member name (constants mem)
-        then return $ Left "Ошибка: Имя уже занято"
+    (mem, addr, lastKey, graphicsState) <- get
+    if Map.member addr mem
+        then return $ Left "Ошибка: Адрес уже занят"
         else do
-            let addr = nextAddress mem
-            put mem { variables = addVariable name addr (variables mem),
-                      variableValues = Map.insert addr 0 (variableValues mem),
-                      nextAddress = addr + 1 }
+            let mem' = Map.insert addr 0 mem
+            put (mem', addr + 1, lastKey, graphicsState)
             return $ Right addr
 
--- Объявление константы
+-- Объявление константы: устанавливает её значение по адресу
 declareConstant :: String -> Int -> MemoryMonad (Either String ())
 declareConstant name value = do
-    mem <- get
-    if Map.member name (constants mem) || Map.member name (variables mem)
-        then return $ Left "Ошибка: Имя уже занято"
+    (mem, addr, lastKey, graphicsState) <- get
+    if Map.member addr mem
+        then return $ Left "Ошибка: Адрес уже занят"
         else do
-            put mem { constants = addConstant name value (constants mem) }
+            let mem' = Map.insert addr value mem
+            put (mem', addr + 1, lastKey, graphicsState)
             return $ Right ()
 
--- Установка значения переменной
-setVariable :: Int -> Int -> MemoryMonad (Either String ())
-setVariable addr val = do
-    mem <- get
-    if Map.member addr (variableValues mem)
+-- Установка значения переменной по адресу
+setVariable :: Address -> Int -> MemoryMonad (Either String ())
+setVariable addr value = do
+    (mem, nextAddr, lastKey, graphicsState) <- get
+    if Map.member addr mem
         then do
-            let newVarValues = Map.insert addr val (variableValues mem)
-            put mem { variableValues = newVarValues }
+            let mem' = Map.insert addr value mem
+            put (mem', nextAddr, lastKey, graphicsState)
             return $ Right ()
-        else return $ Left "Ошибка: Недопустимый адрес переменной"
+        else return $ Left "Ошибка: Переменная не найдена"
 
--- Получение значения переменной
-getVariable :: Int -> MemoryMonad (Either String Int)
+-- Получение значения переменной по адресу
+getVariable :: Address -> MemoryMonad (Either String Int)
 getVariable addr = do
-    mem <- get
-    case Map.lookup addr (variableValues mem) of
+    (mem, _, _, _) <- get
+    case Map.lookup addr mem of
         Just val -> return $ Right val
-        Nothing -> return $ Left "Ошибка: Недопустимый адрес переменной"
+        Nothing  -> return $ Left "О"
+
