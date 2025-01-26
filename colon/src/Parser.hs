@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -Wno-overlapping-patterns #-}
 module Parser (
     parseAndExecute,
     processTokens
@@ -36,34 +37,33 @@ processTokens (token:tokens) stack dictionary isDefining
             -- Завершение определения слова
             executeTokens tokens stack dictionary False
         else
-            -- Добавление токена в текущую дефиницию
-            -- Предполагаем, что мы уже собрали имя слова
-            -- Для этого нам нужно изменить подход
-            -- Вместо этого используем другую функцию для определения
             defineWord token tokens stack dictionary
     | token == ":" = do
         case tokens of
-            (wordName:rest) -> do
-                -- Начало определения нового слова
-                -- Сохраняем имя слова и начинаем сбор его определения
-                -- Используем рекурсию или дополнительную функцию
-                defineWordDefinition wordName rest stack dictionary
+            (wordName:rest) -> defineWordDefinition wordName rest stack dictionary
             _ -> do
                 liftIO $ putStrLn "Ошибка: Ожидалось имя нового слова после ':'"
                 return (stack, dictionary)
+    | token == "BEGIN" = do
+        let (bodyTokens, remainingTokens) = break (== "UNTIL") tokens
+        if null remainingTokens then do
+            liftIO $ putStrLn "Ошибка: Ожидалось 'UNTIL' для завершения цикла"
+            return (stack, dictionary)
+        else do
+            -- Выполнение тела цикла до выполнения условия
+            (finalStack, finalDictionary) <- processBeginUntil bodyTokens stack dictionary
+            processTokens (tail remainingTokens) finalStack finalDictionary isDefining
     | isNumber token = -- Число
         let number = read token :: Int
         in processTokens tokens (push number stack) dictionary isDefining
     | token `elem` ["+", "-", "*", "/", "MOD", "DUP", "DROP", "SWAP", "OVER", "ROT", ".", "CR", "EMIT", "KEY", ".\"", "=", "<", ">", "AND", "OR", "INVERT", "IF", "DO", "I", "LOOP", "VARIABLE", "CONSTANT", "!", "@", "?", "+!", "-!", "*!", "/!", "MOD!"] =
-        -- Обработка существующих команд
         handleCommand token tokens stack dictionary isDefining
     | otherwise = case Map.lookup token dictionary of
-        Just definition -> do
-            -- Вставляем определение слова в текущий список токенов
-            processTokens (definition ++ tokens) stack dictionary isDefining
+        Just definition -> processTokens (definition ++ tokens) stack dictionary isDefining
         Nothing -> do
             liftIO $ putStrLn $ "Unknown command: " ++ token
             return (stack, dictionary)
+
 
 -- Функция для начала определения нового слова
 defineWordDefinition :: String -> [String] -> Stack -> Dictionary -> ExecuteMonad (Stack, Dictionary)
@@ -101,6 +101,7 @@ handleCommand token tokens stack dictionary isDefining
             _ -> do
                 liftIO $ putStrLn "Ошибка: Ожидалось имя переменной после 'VARIABLE'"
                 return (stack, dictionary)
+
     | token == "CONSTANT" = do
         case tokens of
             (valueStr:name:rest) ->
@@ -125,6 +126,11 @@ handleCommand token tokens stack dictionary isDefining
     | token `elem` ["!", "@", "?", "+!", "-!", "*!", "/!", "MOD!"] = do
         -- Обработка операторов над переменными
         handleVariableOperator token tokens stack dictionary isDefining
+    | token == "BEGIN" || token == "UNTIL" =
+            -- Эти команды уже обрабатываются в processTokens
+            -- Возвращаем текущее состояние без изменений
+            return (stack, dictionary)
+
     | otherwise = do
         -- Обработка арифметических и других команд
         case token of
@@ -343,3 +349,20 @@ processLoop start end tokens stack dictionary isDefining = do
         -- Для простоты, просто помещаем индекс на стек
         (finalStack, finalDictionary) <- processTokens tokens (push index currentStack) currentDictionary isDefining
         return (finalStack, finalDictionary)
+-- Циклическая обработка для команды BEGIN ... UNTIL
+processBeginUntil :: [String] -> Stack -> Dictionary -> ExecuteMonad (Stack, Dictionary)
+processBeginUntil bodyTokens stack dictionary = do
+    let executeOnce currentStack currentDictionary = do
+            -- Выполнение тела цикла
+            (newStack, newDictionary) <- processTokens bodyTokens currentStack currentDictionary False
+            -- Проверка условия: верхнее значение стека
+            case newStack of
+                (condition:restStack) ->
+                    if condition /= 0
+                        then return (restStack, newDictionary) -- Условие истинно, завершаем цикл
+                        else executeOnce restStack newDictionary -- Условие ложно, продолжаем цикл
+                [] -> do
+                    liftIO $ putStrLn "Ошибка: Стек пуст при проверке условия в UNTIL"
+                    return (newStack, newDictionary)
+    executeOnce stack dictionary
+
