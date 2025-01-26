@@ -216,3 +216,12 @@
    ```bash
    cabal update
    cabal build
+   
+### Выбранный функционал на 2 этап:
+- Цикл BEGIN UNTIL
+- Работа с графикой GRAPHICS + LAST-KEY
+- Проверка комментариев про стек
+- Массивы
+- REPL с readline
+- Конструкция case of endof endcase
+- Арифмитические операции над числами с плавающей запятой
