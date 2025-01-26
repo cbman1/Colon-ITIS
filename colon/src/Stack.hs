@@ -1,20 +1,41 @@
-module Stack (State(..), emptyState, push, pop, top) where
+module Stack where
 
 type Stack = [Int]
-type Variables = [(String, Int)]
+type LoopStack = [(Int, Int)]  -- (начальное значение, конечное значение)
 
-data State = State { stack :: Stack, variables :: Variables }
+-- Инициализация пустого стека
+emptyStack :: Stack
+emptyStack = []
 
-emptyState :: State
-emptyState = State [] []
+-- Инициализация пустого стека циклов
+emptyLoopStack :: LoopStack
+emptyLoopStack = []
 
-push :: Int -> State -> State
-push n (State st vars) = State (n : st) vars
+-- Добавление элемента на стек
+push :: Int -> Stack -> Stack
+push x stack = x : stack
 
-pop :: State -> (Int, State)
-pop (State (x:xs) vars) = (x, State xs vars)
-pop _ = error "Stack underflow"
+-- Удаление элемента с вершины стека
+pop :: Stack -> (Int, Stack)
+pop (x:xs) = (x, xs)
+pop [] = error "Stack underflow"
 
-top :: State -> Int
-top (State (x:_) _) = x
-top _ = error "Stack underflow"
+-- Дублирование вершины стека
+dup :: Stack -> Stack
+dup [] = error "Stack underflow"
+dup (x:xs) = x : x : xs
+
+-- Обмен двух верхних элементов стека
+swap :: Stack -> Stack
+swap (x:y:xs) = y : x : xs
+swap _ = error "Stack underflow"
+
+-- Копирование второго элемента на вершину стека
+over :: Stack -> Stack
+over (x:y:xs) = y : x : y : xs
+over _ = error "Stack underflow"
+
+-- Вращение трех верхних элементов стека
+rot :: Stack -> Stack
+rot (x:y:z:xs) = y : z : x : xs
+rot _ = error "Stack underflow"

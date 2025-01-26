@@ -1,24 +1,68 @@
-module Arithmetic (add, subtract', multiply, divide, mod') where
+module Arithmetic where
 
 import Stack
 
-add, subtract', multiply, divide, mod' :: State -> State
-add st = let (a, st') = pop st
-             (b, st'') = pop st'
-         in push (a + b) st''
+-- Сложение
+add :: Stack -> Stack
+add stack = let (x, stack') = pop stack
+                (y, stack'') = pop stack'
+            in push (x + y) stack''
 
-subtract' st = let (a, st') = pop st
-                   (b, st'') = pop st'
-               in push (b - a) st''
+-- Вычитание
+sub :: Stack -> Stack
+sub stack = let (x, stack') = pop stack
+                (y, stack'') = pop stack'
+            in push (y - x) stack''
 
-multiply st = let (a, st') = pop st
-                  (b, st'') = pop st'
-              in push (a * b) st''
+-- Умножение
+mul :: Stack -> Stack
+mul stack = let (x, stack') = pop stack
+                (y, stack'') = pop stack'
+            in push (x * y) stack''
 
-divide st = let (a, st') = pop st
-                (b, st'') = pop st'
-            in push (b `div` a) st''
+-- Деление
+div' :: Stack -> Stack
+div' stack = let (x, stack') = pop stack
+                 (y, stack'') = pop stack'
+             in push (y `div` x) stack''
 
-mod' st = let (a, st') = pop st
-              (b, st'') = pop st'
-          in push (b `mod` a) st''
+-- Остаток от деления
+mod' :: Stack -> Stack
+mod' stack = let (x, stack') = pop stack
+                 (y, stack'') = pop stack'
+             in push (y `mod` x) stack''
+
+-- Равенство ( = )
+eq :: Stack -> Stack
+eq stack = let (x, stack') = pop stack
+               (y, stack'') = pop stack'
+           in push (if y == x then -1 else 0) stack''
+
+-- Меньше ( < )
+lt :: Stack -> Stack
+lt stack = let (x, stack') = pop stack
+               (y, stack'') = pop stack'
+           in push (if y < x then -1 else 0) stack''
+
+-- Больше ( > )
+gt :: Stack -> Stack
+gt stack = let (x, stack') = pop stack
+               (y, stack'') = pop stack'
+           in push (if y > x then -1 else 0) stack''
+
+-- Логическое И ( AND )
+and' :: Stack -> Stack
+and' stack = let (x, stack') = pop stack
+                 (y, stack'') = pop stack'
+             in push (if y /= 0 && x /= 0 then -1 else 0) stack''
+
+-- Логическое ИЛИ ( OR )
+or' :: Stack -> Stack
+or' stack = let (x, stack') = pop stack
+                (y, stack'') = pop stack'
+            in push (if y /= 0 || x /= 0 then -1 else 0) stack''
+
+-- Логическое НЕ ( INVERT )
+invert :: Stack -> Stack
+invert stack = let (x, stack') = pop stack
+               in push (if x == 0 then -1 else 0) stack'
