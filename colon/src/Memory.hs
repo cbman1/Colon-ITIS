@@ -60,7 +60,9 @@ data MemoryState = MemoryState {
     variables :: Variables,
     variableValues :: VariableValues,
     constants :: Constants,
-    nextAddress :: Int
+    nextAddress :: Int,
+    currentLoopIndex :: Maybe Int      -- Добавляем это поле
+
 } deriving Show
 
 -- Инициализация состояния памяти
@@ -69,7 +71,9 @@ initialMemory = MemoryState {
     variables = emptyVariables,
     variableValues = emptyVariableValues,
     constants = emptyConstants,
-    nextAddress = 1000  -- Начальный адрес для переменных
+    nextAddress = 1000,  -- Начальный адрес для переменных
+    currentLoopIndex = Nothing         -- Инициализируем Nothing
+
 }
 
 -- Монадический контекст для работы с памятью
