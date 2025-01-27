@@ -42,8 +42,7 @@ parseAndExecute input stack dictionary = do
 type ExecuteMonad = MemoryMonad
 
 executeTokens :: [String] -> Stack -> Dictionary -> Bool -> ExecuteMonad (Stack, Dictionary)
-executeTokens tokens stack dictionary isDef =
-    processTokens tokens stack dictionary isDef
+executeTokens = processTokens
 
 --------------------------------------------------------------------------------
 -- processTokens
@@ -59,12 +58,11 @@ processTokens (token:tokens) st dict isDefining
         else
             defineWord token tokens st dict
 
-    | token == ":" = do
-        case tokens of
-            (wordName:rest) -> defineWordDefinition wordName rest st dict
-            _ -> do
-                liftIO $ putStrLn "Ошибка: Ожидалось имя нового слова после ':'"
-                return (st, dict)
+    | token == ":" = case tokens of
+    (wordName:rest) -> defineWordDefinition wordName rest st dict
+    _ -> do
+        liftIO $ putStrLn "Ошибка: Ожидалось имя нового слова после ':'"
+        return (st, dict)
 
     | token == "BEGIN" = do
         let (bodyTokens, remainingTokens) = break (== "UNTIL") tokens
@@ -75,6 +73,8 @@ processTokens (token:tokens) st dict isDefining
            else do
                (finalStack, finalDict) <- processBeginUntil bodyTokens st dict
                processTokens (tail remainingTokens) finalStack finalDict isDefining
+
+    | token == "CASE" = handleCase tokens st dict isDefining
 
     | isNumber token =
         case parseValue token of
@@ -133,7 +133,7 @@ defineWordDefinition wordName tokens st dict = do
                        liftIO $ putStrLn "ok"
                        processTokens (tail remaining) st newDict False
                  Right netEff ->
-                   if netEff == (outCount - inCount)
+                   if netEff == outCount - inCount
                      then do
                        let newDict = Map.insert wordName definition dict
                        liftIO $ putStrLn "ok"
@@ -177,138 +177,130 @@ handleCommand token tokens st dict isDefining
     ----------------------------------------------------
     -- VARIABLE
     ----------------------------------------------------
-    | token == "VARIABLE" = do
-        case tokens of
-            (varName:rest) -> do
-                res <- declareVariable varName
-                case res of
-                    Left err -> do
-                        liftIO $ putStrLn err
-                        processTokens rest st dict isDefining
-                    Right addr -> do
-                        let newDict = addWord varName [show addr] dict
-                        liftIO $ putStrLn "ok"
-                        processTokens rest st newDict isDefining
-            _ -> do
-                liftIO $ putStrLn "Ошибка: VARIABLE без имени"
-                return (st, dict)
+    | token == "VARIABLE" = case tokens of
+    (varName:rest) -> do
+        res <- declareVariable varName
+        case res of
+            Left err -> do
+                liftIO $ putStrLn err
+                processTokens rest st dict isDefining
+            Right addr -> do
+                let newDict = addWord varName [show addr] dict
+                liftIO $ putStrLn "ok"
+                processTokens rest st newDict isDefining
+    _ -> do
+        liftIO $ putStrLn "Ошибка: VARIABLE без имени"
+        return (st, dict)
 
     ----------------------------------------------------
     -- CONSTANT
     ----------------------------------------------------
-    | token == "CONSTANT" = do
-        case tokens of
-            (valueStr:name:rest) ->
-                case parseValue valueStr of
-                  Just (I i) -> do
-                      res <- declareConstant name i
-                      case res of
-                          Left err -> do
-                              liftIO $ putStrLn err
-                              processTokens rest st dict isDefining
-                          Right () -> do
-                              let newDict = addWord name [show i] dict
-                              liftIO $ putStrLn "ok"
-                              processTokens rest st newDict isDefining
-                  Just (F d) -> do
-                      liftIO $ putStrLn "Предупреждение: CONSTANT с вещественным числом не поддержано"
-                      return (st, dict)
-                  Nothing -> do
-                      liftIO $ putStrLn "Ошибка: ожидалось число для CONSTANT"
-                      return (st, dict)
-            _ -> do
-                liftIO $ putStrLn "Ошибка: Ожидалось имя и значение константы"
-                return (st, dict)
-
-    | token == "CREATE" = do
-              case tokens of
-                  (name:rest) -> do
-                      mem <- get
-                      let baseAddr = nextAddress mem
-                      -- Добавляем имя в словарь как "константу", которая кладёт baseAddr
-                      let newDict = addWord name [show baseAddr] dict
+    | token == "CONSTANT" = case tokens of
+    (valueStr:name:rest) ->
+        case parseValue valueStr of
+          Just (I i) -> do
+              res <- declareConstant name i
+              case res of
+                  Left err -> do
+                      liftIO $ putStrLn err
+                      processTokens rest st dict isDefining
+                  Right () -> do
+                      let newDict = addWord name [show i] dict
                       liftIO $ putStrLn "ok"
-                      -- Не меняем nextAddress прямо здесь
                       processTokens rest st newDict isDefining
-                  [] -> do
-                      liftIO $ putStrLn "Ошибка: CREATE без имени"
-                      return (st, dict)
+          Just (F d) -> do
+              liftIO $ putStrLn "Предупреждение: CONSTANT с вещественным числом не поддержано"
+              return (st, dict)
+          Nothing -> do
+              liftIO $ putStrLn "Ошибка: ожидалось число для CONSTANT"
+              return (st, dict)
+    _ -> do
+        liftIO $ putStrLn "Ошибка: Ожидалось имя и значение константы"
+        return (st, dict)
 
-    | token == "CELLS" = do
-              case st of
-                  (I n : xs) ->
-                      let cellSize = 1  -- если хотим, можно 4
-                          newVal   = n * cellSize
-                      in processTokens tokens (push (I newVal) xs) dict isDefining
+    | token == "CREATE" = case tokens of
+    (name:rest) -> do
+        mem <- get
+        let baseAddr = nextAddress mem
+        -- Добавляем имя в словарь как "константу", которая кладёт baseAddr
+        let newDict = addWord name [show baseAddr] dict
+        liftIO $ putStrLn "ok"
+        -- Не меняем nextAddress прямо здесь
+        processTokens rest st newDict isDefining
+    [] -> do
+        liftIO $ putStrLn "Ошибка: CREATE без имени"
+        return (st, dict)
 
-                  (F d : xs) ->
-                      let cellSize = 1.0
-                          newVal   = d * cellSize
-                      in processTokens tokens (push (F newVal) xs) dict isDefining
+    | token == "CELLS" = case st of
+    (I n : xs) ->
+        let cellSize = 1  -- если хотим, можно 4
+            newVal   = n * cellSize
+        in processTokens tokens (push (I newVal) xs) dict isDefining
 
-                  _ -> do
-                      liftIO $ putStrLn "Ошибка: CELLS требует число на стеке"
-                      return (st, dict)
+    (F d : xs) ->
+        let cellSize = 1.0
+            newVal   = d * cellSize
+        in processTokens tokens (push (F newVal) xs) dict isDefining
 
-    | token == "ALLOT" = do
-              case st of
-                  (I n : xs) -> do
-                      mem <- get
-                      let oldAddr = nextAddress mem
-                          newAddr = oldAddr + n
-                      let oldMap = variableValues mem
-                      let newMap = fillMemory oldMap oldAddr n
-                      put mem { nextAddress = newAddr
-                              , variableValues = newMap
-                              }
-                      liftIO $ putStrLn "ok"
-                      processTokens tokens xs dict isDefining
+    _ -> do
+        liftIO $ putStrLn "Ошибка: CELLS требует число на стеке"
+        return (st, dict)
 
-                  (F d : xs) -> do
-                      mem <- get
-                      let n = floor d
-                      let oldAddr = nextAddress mem
-                          newAddr = oldAddr + n
-                      let oldMap = variableValues mem
-                      let newMap = fillMemory oldMap oldAddr n
-                      put mem { nextAddress = newAddr
-                              , variableValues = newMap
-                              }
-                      liftIO $ putStrLn "ok"
-                      processTokens tokens xs dict isDefining
+    | token == "ALLOT" = case st of
+    (I n : xs) -> do
+        mem <- get
+        let oldAddr = nextAddress mem
+            newAddr = oldAddr + n
+        let oldMap = variableValues mem
+        let newMap = fillMemory oldMap oldAddr n
+        put mem { nextAddress = newAddr
+                , variableValues = newMap
+                }
+        liftIO $ putStrLn "ok"
+        processTokens tokens xs dict isDefining
 
-                  _ -> do
-                      liftIO $ putStrLn "Ошибка: ALLOT требует число на вершине стека"
-                      return (st, dict)
+    (F d : xs) -> do
+        mem <- get
+        let n = floor d
+        let oldAddr = nextAddress mem
+            newAddr = oldAddr + n
+        let oldMap = variableValues mem
+        let newMap = fillMemory oldMap oldAddr n
+        put mem { nextAddress = newAddr
+                , variableValues = newMap
+                }
+        liftIO $ putStrLn "ok"
+        processTokens tokens xs dict isDefining
+
+    _ -> do
+        liftIO $ putStrLn "Ошибка: ALLOT требует число на вершине стека"
+        return (st, dict)
 
     ----------------------------------------------------
     -- Операторы над переменными
     ----------------------------------------------------
-    | token `elem` ["!", "@", "?", "+!", "-!", "*!", "/!", "MOD!"] = do
-        handleVariableOperator token tokens st dict isDefining
+    | token `elem` ["!", "@", "?", "+!", "-!", "*!", "/!", "MOD!"] = handleVariableOperator token tokens st dict isDefining
 
     ----------------------------------------------------
     -- Преобразования: S>F, F>S
     ----------------------------------------------------
-    | token == "S>F" = do
-        case st of
-          (I i : xs) -> processTokens tokens (push (F (fromIntegral i)) xs) dict isDefining
-          (F _ : _)  -> do
-            liftIO $ putStrLn "Ошибка: S>F требует целое (I int) на вершине"
-            return (st, dict)
-          [] -> do
-            liftIO $ putStrLn "Ошибка: пустой стек для S>F"
-            return (st, dict)
+    | token == "S>F" = case st of
+  (I i : xs) -> processTokens tokens (push (F (fromIntegral i)) xs) dict isDefining
+  (F _ : _)  -> do
+    liftIO $ putStrLn "Ошибка: S>F требует целое (I int) на вершине"
+    return (st, dict)
+  [] -> do
+    liftIO $ putStrLn "Ошибка: пустой стек для S>F"
+    return (st, dict)
 
-    | token == "F>S" = do
-        case st of
-          (F d : xs) -> processTokens tokens (push (I (truncate d)) xs) dict isDefining
-          (I _ : _)  -> do
-            liftIO $ putStrLn "Ошибка: F>S требует вещественное (F double) на вершине"
-            return (st, dict)
-          [] -> do
-            liftIO $ putStrLn "Ошибка: пустой стек для F>S"
-            return (st, dict)
+    | token == "F>S" = case st of
+  (F d : xs) -> processTokens tokens (push (I (truncate d)) xs) dict isDefining
+  (I _ : _)  -> do
+    liftIO $ putStrLn "Ошибка: F>S требует вещественное (F double) на вершине"
+    return (st, dict)
+  [] -> do
+    liftIO $ putStrLn "Ошибка: пустой стек для F>S"
+    return (st, dict)
 
     ----------------------------------------------------
     -- BEGIN / UNTIL уже обрабатываются в processTokens
@@ -394,8 +386,7 @@ handleCommand token tokens st dict isDefining
                     Nothing -> do
                         liftIO $ putStrLn "Ошибка: 'I' вне контекста DO ... LOOP"
                         return (st, dict)
-                    Just idx -> do
-                        processTokens tokens (push (I idx) st) dict isDefining
+                    Just idx -> processTokens tokens (push (I idx) st) dict isDefining
 
             "LOOP" -> processTokens tokens st dict isDefining
 
@@ -426,6 +417,96 @@ splitIfTokens tokens =
     let ifTokens   = takeWhile (/= "THEN") tokens
         thenTokens = dropWhile (/= "THEN") tokens
     in (ifTokens, thenTokens)
+
+--------------------------------------------------------------------------------
+-- Реализация CASE ... OF ... ENDOF ... ENDCASE
+--------------------------------------------------------------------------------
+handleCase
+  :: [String]
+  -> Stack
+  -> Dictionary
+  -> Bool
+  -> ExecuteMonad (Stack, Dictionary)
+handleCase tokens st dict isDef = do
+    -- Снимаем switchValue
+    if null st
+       then do
+         liftIO $ putStrLn "Ошибка: CASE требует значение на стеке"
+         return (st, dict)
+       else do
+         let (switchVal, st1) = pop st
+         -- Ищем всё до ENDCASE
+         let (caseTokens, afterCase) = break (== "ENDCASE") tokens
+         if null afterCase
+            then do
+              liftIO $ putStrLn "Ошибка: не найден ENDCASE"
+              return (st, dict)
+            else do
+              let remainingAfterEndcase = tail afterCase -- убираем "ENDCASE"
+
+              (matched, stResult, dictResult, leftover) <-
+                  parseCaseOfBranches caseTokens st1 dict isDef switchVal
+
+              (if matched then processTokens remainingAfterEndcase stResult dictResult isDef else (do
+                (fSt, fDict) <- processTokens leftover st1 dictResult isDef
+                processTokens remainingAfterEndcase fSt fDict isDef))
+
+
+parseCaseOfBranches
+  :: [String]
+  -> Stack
+  -> Dictionary
+  -> Bool
+  -> Value
+  -> ExecuteMonad (Bool, Stack, Dictionary, [String])
+parseCaseOfBranches [] st dict _ _ =
+    return (False, st, dict, [])
+
+parseCaseOfBranches tokens st dict isDef switchVal = do
+    -- Ищем "OF"
+    let (beforeOf, afterOf) = break (== "OF") tokens
+    if null afterOf
+       then
+         return (False, st, dict, tokens)
+       else do
+         let afterOf' = tail afterOf -- убираем "OF"
+         (stExpr, dictExpr) <- processTokens beforeOf st dict isDef
+         if null stExpr
+            then do
+              liftIO $ putStrLn "Ошибка: недостаточно данных для OF"
+              return (False, stExpr, dictExpr, tokens)
+            else do
+              let (candidate, stExpr2) = pop stExpr
+              if valuesEqual candidate switchVal
+                 then do
+                   let (bodyTokens, remainEndof) = break (== "ENDOF") afterOf'
+                   if null remainEndof
+                      then do
+                        liftIO $ putStrLn "Ошибка: нет ENDOF"
+                        return (False, stExpr2, dictExpr, [])
+                      else do
+                        let afterEndof = tail remainEndof -- убираем "ENDOF"
+                        (stBody, dictBody) <- processTokens bodyTokens stExpr2 dictExpr isDef
+                        return (True, stBody, dictBody, afterEndof)
+                 else do
+                   let (bodyTokens, remainEndof) = break (== "ENDOF") afterOf'
+                   if null remainEndof
+                      then do
+                        liftIO $ putStrLn "Ошибка: нет ENDOF (no match)"
+                        return (False, stExpr2, dictExpr, [])
+                      else do
+                        let afterEndof = tail remainEndof
+                        parseCaseOfBranches afterEndof stExpr2 dictExpr isDef switchVal
+
+
+--------------------------------------------------------------------------------
+-- Сравнение двух Value
+--------------------------------------------------------------------------------
+
+valuesEqual :: Value -> Value -> Bool
+valuesEqual (I x) (I y) = x == y
+valuesEqual (F a) (F b) = a == b
+valuesEqual _ _         = False
 
 --------------------------------------------------------------------------------
 -- BEGIN ... UNTIL
@@ -480,83 +561,79 @@ handleVariableOperator
   -> Bool
   -> ExecuteMonad (Stack, Dictionary)
 handleVariableOperator token tokens st dict isDef
-    | token == "!" = do
-        case st of
-            (I value : I addr : rest) -> do
-                res <- setVariable addr value
-                case res of
-                    Left err -> do
-                        liftIO $ putStrLn err
+    | token == "!" = case st of
+    (I value : I addr : rest) -> do
+        res <- setVariable addr value
+        case res of
+            Left err -> do
+                liftIO $ putStrLn err
+                processTokens tokens rest dict isDef
+            Right () -> do
+                liftIO $ putStrLn "ok"
+                processTokens tokens rest dict isDef
+    (I _ : F _ : _) -> do
+        liftIO $ putStrLn "Ошибка: нельзя записать вещественное в Int-переменную (упрощённый пример)"
+        return (st, dict)
+    _ -> do
+        liftIO $ putStrLn "Ошибка: '!' требует (I addr, I value)"
+        return (st, dict)
+
+    | token == "@" = case st of
+    (I addr : rest) -> do
+        res <- getVariable addr
+        case res of
+            Left err -> do
+                liftIO $ putStrLn err
+                processTokens tokens rest dict isDef
+            Right val ->
+                processTokens tokens (push (I val) rest) dict isDef
+    _ -> do
+        liftIO $ putStrLn "Ошибка: '@' требует Int addr"
+        return (st, dict)
+
+    | token == "?" = case st of
+    (I addr : rest) -> do
+        res <- getVariable addr
+        case res of
+            Left err -> do
+                liftIO $ putStrLn err
+                processTokens tokens rest dict isDef
+            Right val -> do
+                liftIO $ print val
+                processTokens tokens rest dict isDef
+    _ -> do
+        liftIO $ putStrLn "Ошибка: '?' требует Int addr"
+        return (st, dict)
+
+    | token `elem` ["+!", "-!", "*!", "/!", "MOD!"] = case st of
+    (I value : I varAddr : rest) -> do
+        curValRes <- getVariable varAddr
+        case curValRes of
+            Left err -> do
+                liftIO $ putStrLn err
+                processTokens tokens rest dict isDef
+            Right curVal -> do
+                let newVal = case token of
+                        "+!"  -> curVal + value
+                        "-!"  -> curVal - value
+                        "*!"  -> curVal * value
+                        "/!"  -> if value /= 0 then curVal `div` value else curVal
+                        "MOD!"-> if value /= 0 then curVal `mod` value else curVal
+                        _     -> curVal
+                setRes <- setVariable varAddr newVal
+                case setRes of
+                    Left e -> do
+                        liftIO $ putStrLn e
                         processTokens tokens rest dict isDef
                     Right () -> do
                         liftIO $ putStrLn "ok"
                         processTokens tokens rest dict isDef
-            (I _ : F _ : _) -> do
-                liftIO $ putStrLn "Ошибка: нельзя записать вещественное в Int-переменную (упрощённый пример)"
-                return (st, dict)
-            _ -> do
-                liftIO $ putStrLn "Ошибка: '!' требует (I addr, I value)"
-                return (st, dict)
-
-    | token == "@" = do
-        case st of
-            (I addr : rest) -> do
-                res <- getVariable addr
-                case res of
-                    Left err -> do
-                        liftIO $ putStrLn err
-                        processTokens tokens rest dict isDef
-                    Right val ->
-                        processTokens tokens (push (I val) rest) dict isDef
-            _ -> do
-                liftIO $ putStrLn "Ошибка: '@' требует Int addr"
-                return (st, dict)
-
-    | token == "?" = do
-        case st of
-            (I addr : rest) -> do
-                res <- getVariable addr
-                case res of
-                    Left err -> do
-                        liftIO $ putStrLn err
-                        processTokens tokens rest dict isDef
-                    Right val -> do
-                        liftIO $ print val
-                        processTokens tokens rest dict isDef
-            _ -> do
-                liftIO $ putStrLn "Ошибка: '?' требует Int addr"
-                return (st, dict)
-
-    | token `elem` ["+!", "-!", "*!", "/!", "MOD!"] = do
-        case st of
-            (I value : I varAddr : rest) -> do
-                curValRes <- getVariable varAddr
-                case curValRes of
-                    Left err -> do
-                        liftIO $ putStrLn err
-                        processTokens tokens rest dict isDef
-                    Right curVal -> do
-                        let newVal = case token of
-                                "+!"  -> curVal + value
-                                "-!"  -> curVal - value
-                                "*!"  -> curVal * value
-                                "/!"  -> if value /= 0 then curVal `div` value else curVal
-                                "MOD!"-> if value /= 0 then curVal `mod` value else curVal
-                                _     -> curVal
-                        setRes <- setVariable varAddr newVal
-                        case setRes of
-                            Left e -> do
-                                liftIO $ putStrLn e
-                                processTokens tokens rest dict isDef
-                            Right () -> do
-                                liftIO $ putStrLn "ok"
-                                processTokens tokens rest dict isDef
-            (I _ : F _ : _) -> do
-                liftIO $ putStrLn "Ошибка: нельзя вещественным менять переменную Int"
-                return (st, dict)
-            _ -> do
-                liftIO $ putStrLn $ "Ошибка: " ++ token ++ " требует (Int addr, Int value)"
-                return (st, dict)
+    (I _ : F _ : _) -> do
+        liftIO $ putStrLn "Ошибка: нельзя вещественным менять переменную Int"
+        return (st, dict)
+    _ -> do
+        liftIO $ putStrLn $ "Ошибка: " ++ token ++ " требует (Int addr, Int value)"
+        return (st, dict)
 
     | otherwise = return (st, dict)
 
@@ -610,7 +687,7 @@ parseValue s =
 toBool' :: Value -> Bool
 toBool' (I 0) = False
 toBool' (I _) = True
-toBool' (F f) = (f /= 0.0)
+toBool' (F f) = f /= 0.0
 
 --------------------------------------------------------------------------------
 -- Извлечение строки для команды ."
@@ -634,7 +711,7 @@ extractStackComment :: [String] -> (Maybe (Int, Int), [String])
 extractStackComment defs =
     case break isStackComment defs of
       (before, []) -> (Nothing, before)
-      (before, (comment:after)) ->
+      (before, comment:after) ->
           case parseStackComment comment of
              Just (ic, oc) -> (Just (ic, oc), before ++ after)
              Nothing       -> (Nothing, before ++ after)
