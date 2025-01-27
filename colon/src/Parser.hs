@@ -10,7 +10,6 @@ import Arithmetic
     , eq, lt, gt
     , and', or'
     , invert
-    -- ВАЖНО: НЕ импортируем toBool из Arithmetic, чтобы не было конфликта!
     )
 import IO
 import Data.Char (isDigit)
@@ -93,6 +92,7 @@ processTokens (token:tokens) st dict isDefining
         , "VARIABLE", "CONSTANT"
         , "!", "@", "?", "+!", "-!", "*!", "/!", "MOD!"
         , "S>F", "F>S"
+        , "CREATE", "CELLS", "ALLOT"
         ] =
         handleCommand token tokens st dict isDefining
 
@@ -219,6 +219,67 @@ handleCommand token tokens st dict isDefining
             _ -> do
                 liftIO $ putStrLn "Ошибка: Ожидалось имя и значение константы"
                 return (st, dict)
+
+    | token == "CREATE" = do
+              case tokens of
+                  (name:rest) -> do
+                      mem <- get
+                      let baseAddr = nextAddress mem
+                      -- Добавляем имя в словарь как "константу", которая кладёт baseAddr
+                      let newDict = addWord name [show baseAddr] dict
+                      liftIO $ putStrLn "ok"
+                      -- Не меняем nextAddress прямо здесь
+                      processTokens rest st newDict isDefining
+                  [] -> do
+                      liftIO $ putStrLn "Ошибка: CREATE без имени"
+                      return (st, dict)
+
+    | token == "CELLS" = do
+              case st of
+                  (I n : xs) ->
+                      let cellSize = 1  -- если хотим, можно 4
+                          newVal   = n * cellSize
+                      in processTokens tokens (push (I newVal) xs) dict isDefining
+
+                  (F d : xs) ->
+                      let cellSize = 1.0
+                          newVal   = d * cellSize
+                      in processTokens tokens (push (F newVal) xs) dict isDefining
+
+                  _ -> do
+                      liftIO $ putStrLn "Ошибка: CELLS требует число на стеке"
+                      return (st, dict)
+
+    | token == "ALLOT" = do
+              case st of
+                  (I n : xs) -> do
+                      mem <- get
+                      let oldAddr = nextAddress mem
+                          newAddr = oldAddr + n
+                      let oldMap = variableValues mem
+                      let newMap = fillMemory oldMap oldAddr n
+                      put mem { nextAddress = newAddr
+                              , variableValues = newMap
+                              }
+                      liftIO $ putStrLn "ok"
+                      processTokens tokens xs dict isDefining
+
+                  (F d : xs) -> do
+                      mem <- get
+                      let n = floor d
+                      let oldAddr = nextAddress mem
+                          newAddr = oldAddr + n
+                      let oldMap = variableValues mem
+                      let newMap = fillMemory oldMap oldAddr n
+                      put mem { nextAddress = newAddr
+                              , variableValues = newMap
+                              }
+                      liftIO $ putStrLn "ok"
+                      processTokens tokens xs dict isDefining
+
+                  _ -> do
+                      liftIO $ putStrLn "Ошибка: ALLOT требует число на вершине стека"
+                      return (st, dict)
 
     ----------------------------------------------------
     -- Операторы над переменными
@@ -421,7 +482,7 @@ handleVariableOperator
 handleVariableOperator token tokens st dict isDef
     | token == "!" = do
         case st of
-            (I addr : I value : rest) -> do
+            (I value : I addr : rest) -> do
                 res <- setVariable addr value
                 case res of
                     Left err -> do
@@ -498,6 +559,14 @@ handleVariableOperator token tokens st dict isDef
                 return (st, dict)
 
     | otherwise = return (st, dict)
+
+--------------------------------------------------------------------------------
+-- Помощник для заполнения памяти при ALLOT
+--------------------------------------------------------------------------------
+
+fillMemory :: Map Int Int -> Int -> Int -> Map Int Int
+fillMemory varMap start count =
+    foldl (\acc i -> Map.insert (start + i) 0 acc) varMap [0..(count-1)]
 
 --------------------------------------------------------------------------------
 -- Удаление скобочных комментариев ( ... )
@@ -638,6 +707,9 @@ computeStackEffect = go 0
 
       | t == "VARIABLE" = unknown t
       | t == "CONSTANT" = unknown t
+      | t == "CREATE"   = unknown t
+      | t == "CELLS"    = unknown t
+      | t == "ALLOT"    = unknown t
 
 
       | t == "!"   = go (net - 2) ts dict
