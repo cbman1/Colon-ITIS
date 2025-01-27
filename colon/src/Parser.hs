@@ -529,7 +529,7 @@ handleVariableOperator token tokens st dict isDef
 
     | token `elem` ["+!", "-!", "*!", "/!", "MOD!"] = do
         case st of
-            (I varAddr : I value : rest) -> do
+            (I value : I varAddr : rest) -> do
                 curValRes <- getVariable varAddr
                 case curValRes of
                     Left err -> do
