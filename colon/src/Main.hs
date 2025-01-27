@@ -33,4 +33,9 @@ interpreterLoop stack dictionary = do
 -- Функция для отображения состояния стека (вершина справа)
 showStack :: Stack -> String
 showStack [] = "<empty>"
-showStack stack = unwords (map show (reverse stack))
+showStack stack =
+    unwords (map showValue (reverse stack))
+  where
+    showValue (I n) = show n
+    showValue (F d) = show d
+
